@@ -1,0 +1,35 @@
+name: CI
+
+# Validação no workflow reutilizável central (tudoemcodigo/tec-workflows): convenções, build e pacote, unitários
+# em matriz, integração (se houver) e CodeQL, em paralelo. Push na main: depois do ci-ok verde, publica a prévia.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  merge_group:
+  schedule:
+    - cron: '0 6 * * 1'   # segunda, 06:00 UTC: CodeQL novo, vulnerabilidades novas
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-{0}', github.ref) || format('ci-{0}', github.run_id) }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: tudoemcodigo/tec-workflows/.github/workflows/dotnet-ci.yml@v1
+    permissions:
+      contents: read
+      pull-requests: read
+      packages: write
+      actions: read
+      security-events: write
+      id-token: write
+    with:
+      solution: TEC.Http.slnx
+      private-feed: true
+      unit-tests: TEC.Http.Tests

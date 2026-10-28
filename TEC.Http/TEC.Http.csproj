@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>TEC.Http</RootNamespace>
+    <Description>Endurece a borda HTTP das APIs ASP.NET Core: proxy confiável explícito, hosts permitidos, HSTS e headers de segurança, limite de requisições com resposta 429 padronizada e CORS fechado por padrão.</Description>
+    <PackageTags>cors;rate-limit;hsts;forwarded-headers;security;aspnetcore;tec</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <TecReference Include="TEC.Core" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="TEC.Http.Tests/TEC.Http.Tests.csproj" />
+  <Project Path="TEC.Http/TEC.Http.csproj" />
+</Solution>
