@@ -12,6 +12,7 @@ internal sealed class TecHttpOptionsValidator(IConfiguration configuration, IHos
 {
     private const int MaxLimit = 1_000_000;
     private const int MaxSeconds = 86_400;
+    private const int MaxTokenLength = 128;
 
     public ValidateOptionsResult Validate(string? name, TecHttpOptions options)
     {
@@ -108,6 +109,51 @@ internal sealed class TecHttpOptionsValidator(IConfiguration configuration, IHos
                 failures.Add($"Http:Cors:Origins: '{origin}' inválida; use 'https://host[:porta]' sem caminho, barra final ou curinga ('http' só para localhost em Development).");
             }
         }
+
+        ValidateTokens(cors.Methods, "Http:Cors:Methods", "método HTTP", cors.AllowCredentials, failures);
+        ValidateTokens(cors.Headers, "Http:Cors:Headers", "nome de header", cors.AllowCredentials, failures);
+        ValidateTokens(cors.ExposedHeaders, "Http:Cors:ExposedHeaders", "nome de header", cors.AllowCredentials, failures);
+    }
+
+    /// <summary>
+    /// Itens de <c>Methods</c>, <c>Headers</c> e <c>ExposedHeaders</c>: cada um é um token HTTP (RFC 9110), sem espaço,
+    /// vírgula ou caractere de controle. <c>*</c> só sozinho (misturado, o ASP.NET o trataria como texto literal) e nunca
+    /// com <c>AllowCredentials</c>: com credenciais o ASP.NET devolve ao navegador os headers pedidos no preflight, o que
+    /// liberaria qualquer header com cookies e Authorization.
+    /// </summary>
+    private static void ValidateTokens(List<string> values, string path, string kind, bool allowCredentials, List<string> failures)
+    {
+        foreach (var value in values)
+        {
+            if (value == "*")
+            {
+                if (allowCredentials)
+                    failures.Add($"{path}: '*' não pode ser combinado com AllowCredentials; liste os itens.");
+                else if (values.Count > 1)
+                    failures.Add($"{path}: '*' precisa ser o único item da lista.");
+                continue;
+            }
+
+            if (value.Length > MaxTokenLength)
+                failures.Add($"{path}: item com mais de {MaxTokenLength.ToString(CultureInfo.InvariantCulture)} caracteres não é um {kind} válido.");
+            else if (!IsToken(value))
+                failures.Add($"{path}: '{value}' não é um {kind} válido (token HTTP, sem espaço nem vírgula; liste um item por índice).");
+        }
+    }
+
+    /// <summary>tchar da RFC 9110 (seção 5.6.2): letras, dígitos e <c>!#$%&amp;'*+-.^_`|~</c>.</summary>
+    private static bool IsToken(string value)
+    {
+        if (value.Length == 0)
+            return false;
+
+        foreach (var c in value)
+        {
+            if (!char.IsAsciiLetterOrDigit(c) && !"!#$%&'*+-.^_`|~".Contains(c, StringComparison.Ordinal))
+                return false;
+        }
+
+        return true;
     }
 
     private static bool IsValidOrigin(string origin, bool development)

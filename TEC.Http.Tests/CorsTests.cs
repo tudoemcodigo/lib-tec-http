@@ -136,6 +136,114 @@ public class CorsTests
     }
 
     [Test]
+    [Arguments("Methods", "*", "true")]
+    [Arguments("Headers", "*", "true")]
+    [Arguments("ExposedHeaders", "*", "true")]
+    [Arguments("Methods", "GET POST", "false")]
+    [Arguments("Methods", "GET,POST", "false")]
+    [Arguments("Headers", "X-Header\r\nInjetado", "false")]
+    [Arguments("Headers", "Content Type", "false")]
+    [Arguments("ExposedHeaders", "ETag;", "false")]
+    [Arguments("ExposedHeaders", "Retry-After:", "false")]
+    public async Task Metodos_e_headers_invalidos_derrubam_a_subida(string lista, string valor, string credenciais)
+    {
+        await Assert.ThrowsAsync<OptionsValidationException>(async () =>
+        {
+            await using var app = await TestHost.StartAsync(TestHost.Config(
+                ("Http:Cors:Origins:0", "https://app.example.com"),
+                ($"Http:Cors:{lista}:0", valor),
+                ("Http:Cors:AllowCredentials", credenciais)));
+        });
+    }
+
+    [Test]
+    [Arguments("Methods")]
+    [Arguments("Headers")]
+    [Arguments("ExposedHeaders")]
+    public async Task Curinga_misturado_com_outros_itens_derruba_a_subida(string lista)
+    {
+        await Assert.ThrowsAsync<OptionsValidationException>(async () =>
+        {
+            await using var app = await TestHost.StartAsync(TestHost.Config(
+                ("Http:Cors:Origins:0", "https://app.example.com"),
+                ($"Http:Cors:{lista}:0", "*"),
+                ($"Http:Cors:{lista}:1", "X-Outro")));
+        });
+    }
+
+    [Test]
+    public async Task Item_muito_longo_derruba_a_subida()
+    {
+        await Assert.ThrowsAsync<OptionsValidationException>(async () =>
+        {
+            await using var app = await TestHost.StartAsync(TestHost.Config(
+                ("Http:Cors:Origins:0", "https://app.example.com"),
+                ("Http:Cors:Headers:0", "X-" + new string('a', 200))));
+        });
+    }
+
+    [Test]
+    public async Task Curinga_sozinho_sem_credenciais_e_aceito_em_metodos_e_headers()
+    {
+        await using var app = await TestHost.StartAsync(TestHost.Config(
+            ("Http:Cors:Origins:0", "https://app.example.com"),
+            ("Http:Cors:Methods:0", "*"),
+            ("Http:Cors:Headers:0", "*")));
+        using var request = TestHost.Preflight("/ok", "198.51.100.1", "https://app.example.com", "DELETE");
+        request.Headers.Add("Access-Control-Request-Headers", "X-Qualquer");
+
+        using var response = await app.GetTestClient().SendAsync(request);
+
+        await Assert.That(response.Headers.GetValues("Access-Control-Allow-Methods").Single()).Contains("DELETE");
+    }
+
+    [Test]
+    public async Task Metodos_e_headers_validos_sobem_com_credenciais()
+    {
+        await using var app = await TestHost.StartAsync(TestHost.Config(
+            ("Http:Cors:Origins:0", "https://app.example.com"),
+            ("Http:Cors:AllowCredentials", "true"),
+            ("Http:Cors:Methods:0", "GET"),
+            ("Http:Cors:Methods:1", "POST"),
+            ("Http:Cors:Headers:0", "Content-Type"),
+            ("Http:Cors:ExposedHeaders:0", "ETag")));
+        using var request = TestHost.Get("/ok", "198.51.100.1", origin: "https://app.example.com");
+        using var response = await app.GetTestClient().SendAsync(request);
+
+        await Assert.That(response.Headers.GetValues("Access-Control-Expose-Headers").Single()).IsEqualTo("ETag");
+    }
+
+    [Test]
+    [Arguments("Http:Cors:Origins", "https://a.example.com,https://b.example.com")]
+    [Arguments("Http:Cors:Methods", "GET,POST")]
+    [Arguments("Http:Cors:Headers", "Content-Type")]
+    [Arguments("Http:Cors:ExposedHeaders", "ETag")]
+    [Arguments("Http:Forwarding:KnownProxies", "10.0.0.1")]
+    [Arguments("Http:Forwarding:KnownNetworks", "10.1.0.0/16")]
+    public async Task Lista_com_valor_unico_derruba_a_subida_com_mensagem_clara(string chave, string valor)
+    {
+        // Ex.: variável Http__Cors__Origins=https://a,https://b. Ignorar deixaria a lista vazia sem aviso.
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await using var app = await TestHost.StartAsync(TestHost.Config((chave, valor)));
+        });
+
+        await Assert.That(error!.Message).Contains(chave + ":0");
+    }
+
+    [Test]
+    public async Task Lista_vazia_explicita_continua_valendo_como_vazia()
+    {
+        // JSON "Origins": "" (ou variável vazia) não é lista com item: segue fechado, sem derrubar a subida
+        await using var app = await TestHost.StartAsync(TestHost.Config(("Http:Cors:Origins", "")));
+        using var request = TestHost.Get("/ok", "198.51.100.1", origin: "https://app.example.com");
+        using var response = await app.GetTestClient().SendAsync(request);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        await Assert.That(response.Headers.Contains("Access-Control-Allow-Origin")).IsFalse();
+    }
+
+    [Test]
     public async Task MaxAge_invalido_derruba_a_subida()
     {
         await Assert.ThrowsAsync<OptionsValidationException>(async () =>

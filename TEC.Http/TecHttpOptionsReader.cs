@@ -57,10 +57,27 @@ internal static class TecHttpOptionsReader
                 ? value
                 : throw Invalid(section, key, text, "um número inteiro");
 
-    private static IEnumerable<string> List(IConfiguration section, string key) =>
-        section.GetSection(key).GetChildren()
+    /// <summary>
+    /// Lista por índice (<c>Origins:0</c>, <c>Origins:1</c>...). Um valor escalar na própria chave (ex.: variável
+    /// <c>Http__Cors__Origins=https://a,https://b</c>) derruba a subida: ignorá-lo deixaria a lista vazia em silêncio.
+    /// </summary>
+    private static List<string> List(IConfiguration section, string key)
+    {
+        var list = section.GetSection(key);
+        if (!string.IsNullOrWhiteSpace(list.Value))
+        {
+            throw new InvalidOperationException(
+                $"Configuração '{list.Path}' inválida: é uma lista e recebeu um valor único. " +
+                $"Use um item por índice ('{list.Path}:0', '{list.Path}:1'...; em variável de ambiente, " +
+                $"'{list.Path.Replace(":", "__", StringComparison.Ordinal)}__0').");
+        }
+
+        return list.GetChildren()
             .Select(child => child.Value?.Trim())
-            .Where(value => !string.IsNullOrEmpty(value))!;
+            .Where(value => !string.IsNullOrEmpty(value))
+            .Select(value => value!)
+            .ToList();
+    }
 
     private static InvalidOperationException Invalid(IConfiguration section, string key, string value, string expected) =>
         new($"Configuração '{(section as IConfigurationSection)?.Path}:{key}' inválida: '{value}' (esperado {expected}).");

@@ -67,7 +67,7 @@ public static class TecHttpExtensions
     }
 
     /// <summary>
-    /// Pipeline de borda, na ordem: proxy confiável, HSTS, headers de segurança, limite por IP e CORS. Chame depois do
+    /// Pipeline de borda, na ordem: proxy confiável, HSTS, headers de segurança, CORS e limite por IP. Chame depois do
     /// tratamento de exceções e <b>antes</b> de <c>UseAuthentication</c> (o limite por IP precisa conter tentativas de
     /// credencial). Lê as opções aqui, então configuração inválida derruba a subida neste ponto.
     /// </summary>
@@ -98,11 +98,13 @@ public static class TecHttpExtensions
         if (options.SecurityHeaders.Enabled)
             app.Use(SecurityHeadersMiddleware);
 
-        if (options.RateLimiting.Enabled)
-            app.Use(RateLimitMiddleware(services, options.RateLimiting.PerIp, ClientPartition.Ip, "ip"));
-
+        // CORS antes do limite: o preflight é respondido aqui (204) sem consumir o limite, e o 429 do limite sai com os
+        // headers CORS (aplicados no início da resposta), então o navegador de uma origem liberada consegue lê-lo
         if (options.Cors.Origins.Count > 0)
             app.UseCors(CorsPolicyName);
+
+        if (options.RateLimiting.Enabled)
+            app.Use(RateLimitMiddleware(services, options.RateLimiting.PerIp, ClientPartition.Ip, "ip"));
 
         return app;
     }
@@ -151,11 +153,7 @@ public static class TecHttpExtensions
 
         // O padrão do ASP.NET confia em loopback; aqui só vale o que foi configurado
         options.KnownProxies.Clear();
-#if NET10_0_OR_GREATER
         options.KnownIPNetworks.Clear();
-#else
-        options.KnownNetworks.Clear();
-#endif
 
         foreach (var proxy in forwarding.KnownProxies)
             options.KnownProxies.Add(IPAddress.Parse(proxy));
@@ -163,11 +161,7 @@ public static class TecHttpExtensions
         foreach (var network in forwarding.KnownNetworks)
         {
             TecHttpOptionsValidator.TryParseNetwork(network, out var address, out var prefix);
-#if NET10_0_OR_GREATER
             options.KnownIPNetworks.Add(new System.Net.IPNetwork(address, prefix));
-#else
-            options.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(address, prefix));
-#endif
         }
 
         return options;
@@ -218,9 +212,14 @@ public static class TecHttpExtensions
                 })
                 : RateLimitPartition.GetNoLimiter("anonymous"));
         services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopped.Register(limiter.Dispose);
+        var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("TEC.Http");
+        int warnedNoIp = stage == "ip" ? 0 : 1;
 
         return async (context, next) =>
         {
+            if (context.Connection.RemoteIpAddress is null && Interlocked.Exchange(ref warnedNoIp, 1) == 0)
+                TecHttpLog.RemoteIpUnknown(logger);
+
             using var lease = limiter.AttemptAcquire(context);
             if (lease.IsAcquired)
             {

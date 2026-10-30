@@ -14,15 +14,19 @@ internal static class ClientPartition
 
     private const int MaxIdentityKeyLength = 128;
 
+    private const int MaxConnectionKeyLength = 64;
+
     /// <summary>
     /// Chave por IP. IPv6 é agrupado por prefixo /64 (um cliente controla todo o /64; sem isso, rotacionar o sufixo burlaria o
-    /// limite). IP desconhecido cai em um balde compartilhado: falha fechada, nunca sem limite.
+    /// limite). Sem IP (ex.: Unix domain socket, onde o <c>ForwardedHeaders</c> também não confia em proxy nenhum), a chave
+    /// é a conexão: clientes distintos não dividem um balde só e cada conexão continua limitada. Sem IP nem id de conexão,
+    /// cai em um balde compartilhado: falha fechada, nunca sem limite.
     /// </summary>
     public static string Ip(HttpContext context)
     {
         var ip = context.Connection.RemoteIpAddress;
         if (ip is null)
-            return "ip:unknown";
+            return Connection(context.Connection.Id);
 
         if (ip.IsIPv4MappedToIPv6)
             ip = ip.MapToIPv4();
@@ -35,6 +39,17 @@ internal static class ClientPartition
             return "ip:unknown";
 
         return "ip6:" + Convert.ToHexString(bytes[..8]);
+    }
+
+    /// <summary>O id vem do servidor, não do cliente; mesmo assim o tamanho é limitado (hash acima do limite).</summary>
+    private static string Connection(string? id)
+    {
+        if (string.IsNullOrEmpty(id))
+            return "ip:unknown";
+
+        return id.Length <= MaxConnectionKeyLength
+            ? "conn:" + id
+            : "connh:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(id)));
     }
 
     /// <summary>Chave por identidade, ou <c>null</c> para requisição anônima (não passa pelo estágio de identidade).</summary>

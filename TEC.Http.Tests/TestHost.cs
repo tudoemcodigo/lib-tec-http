@@ -17,6 +17,7 @@ internal static class TestHost
 {
     public const string RemoteHeader = "X-Test-Remote";
     public const string UserHeader = "X-Test-User";
+    public const string ConnectionHeader = "X-Test-Connection";
 
     public static async Task<WebApplication> StartAsync(
         IDictionary<string, string?>? config = null,
@@ -39,6 +40,8 @@ internal static class TestHost
             ctx.Connection.RemoteIpAddress = ctx.Request.Headers.TryGetValue(RemoteHeader, out var ip) && IPAddress.TryParse(ip, out var parsed)
                 ? parsed
                 : null;
+            // Id de conexão controlado pelo teste (sem o header: vazio, como servidor que não informa a conexão)
+            ctx.Connection.Id = ctx.Request.Headers.TryGetValue(ConnectionHeader, out var connection) ? connection.ToString() : "";
             return next();
         });
         app.UseTecHttp();
@@ -60,12 +63,24 @@ internal static class TestHost
         return app;
     }
 
-    public static HttpRequestMessage Get(string path, string? remote = null, string? user = null, string? origin = null)
+    public static HttpRequestMessage Get(
+        string path, string? remote = null, string? user = null, string? origin = null, string? connection = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, path);
         if (remote is not null) request.Headers.Add(RemoteHeader, remote);
         if (user is not null) request.Headers.Add(UserHeader, user);
         if (origin is not null) request.Headers.Add("Origin", origin);
+        if (connection is not null) request.Headers.Add(ConnectionHeader, connection);
+        return request;
+    }
+
+    /// <summary>Preflight CORS (OPTIONS com <c>Origin</c> e <c>Access-Control-Request-Method</c>).</summary>
+    public static HttpRequestMessage Preflight(string path, string remote, string origin, string method = "GET")
+    {
+        var request = new HttpRequestMessage(HttpMethod.Options, path);
+        request.Headers.Add(RemoteHeader, remote);
+        request.Headers.Add("Origin", origin);
+        request.Headers.Add("Access-Control-Request-Method", method);
         return request;
     }
 

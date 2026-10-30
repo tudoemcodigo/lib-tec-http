@@ -9,7 +9,7 @@
 **Borda HTTP fechada por padrão para APIs ASP.NET Core: proxy confiável explícito, hosts permitidos, HSTS e headers de segurança, limite de requisições com resposta 429 padronizada e CORS por allowlist.**
 
 [![CI](https://github.com/tudoemcodigo/lib-tec-http/actions/workflows/ci.yml/badge.svg)](https://github.com/tudoemcodigo/lib-tec-http/actions/workflows/ci.yml)
-[![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?logo=dotnet&logoColor=white)](#-compatibilidade)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](#-compatibilidade)
 [![Native AOT](https://img.shields.io/badge/Native%20AOT-compat%C3%ADvel-512BD4)](#-compatibilidade)
 [![Versão](https://img.shields.io/badge/vers%C3%A3o-0.0.1-blue)](CHANGELOG.md)
 [![NuGet](https://img.shields.io/badge/nuget-GitHub%20Packages-0969da?logo=github)](https://github.com/orgs/tudoemcodigo/packages)
@@ -59,9 +59,9 @@ builder.Services.AddTecHttp(builder.Configuration);
 
 var app = builder.Build();
 
-app.UseTecObservability();        // correlation id primeiro
-app.UseTecExceptionHandler();
-app.UseTecHttp();                 // proxy, HSTS, headers, limite por IP, CORS: ANTES da autenticação
+app.UseTecObservability();        // TEC.Observability: correlation id primeiro
+app.UseTecExceptionHandler();     // TEC.Cqrs.AspNetCore
+app.UseTecHttp();                 // proxy, HSTS, headers, CORS, limite por IP: ANTES da autenticação
 app.UseAuthentication();
 app.UseTecRateLimitingPerIdentity();   // DEPOIS da autenticação
 app.UseAuthorization();
@@ -97,7 +97,8 @@ Seção `Http`. Os valores abaixo são os padrões (a seção inteira é opciona
 
 | Item | Comportamento |
 |---|---|
-| **CORS** | Sem `Origins`, nenhuma origem é liberada (é o estado de partida: servidores não usam CORS). Formato `https://host[:porta]`, sem caminho, barra final nem curinga. `*` só em Development e sem credenciais. `http` só para localhost em Development. `Methods` vazio: GET, POST, PUT, PATCH, DELETE. `Headers` vazio: Content-Type, Authorization, X-Api-Key, Idempotency-Key, If-Match. |
+| **CORS** | Sem `Origins`, nenhuma origem é liberada (é o estado de partida: servidores não usam CORS). Formato `https://host[:porta]`, sem caminho, barra final nem curinga. `*` só em Development e sem credenciais. `http` só para localhost em Development. `Methods` vazio: GET, POST, PUT, PATCH, DELETE. `Headers` vazio: Content-Type, Authorization, X-Api-Key, Idempotency-Key, If-Match. Cada item de `Methods`, `Headers` e `ExposedHeaders` precisa ser um token HTTP (sem espaço, vírgula ou quebra de linha, até 128 caracteres). `*` vale só como item único e nunca com `AllowCredentials`. Para o navegador ler o `Retry-After` do 429, inclua `Retry-After` em `ExposedHeaders`. |
+| **Listas** | `Origins`, `Methods`, `Headers`, `ExposedHeaders`, `KnownProxies` e `KnownNetworks` são lidas por índice (`Http:Cors:Origins:0`; em variável de ambiente, `Http__Cors__Origins__0`). Um valor único na própria chave (ex.: `Http__Cors__Origins=https://a,https://b`) derruba a subida com a chave esperada na mensagem, em vez de deixar a lista vazia em silêncio. |
 | **HSTS** | Só fora de Development e em HTTPS. Sem `includeSubDomains` e sem `preload` (irreversíveis na prática; ligue por código se for decisão sua). |
 | **Headers** | `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`. Não sobrescrevem header já definido pela aplicação. |
 | **AllowedHosts** | Fora de Development, vazio ou `*` derruba a subida. Liste também o host que o orquestrador usa nas sondas de saúde (muitos chamam pelo IP do pod, e o filtro responde 400). |
@@ -109,11 +110,15 @@ Seção `Http`. Os valores abaixo são os padrões (a seção inteira é opciona
   e as chaves de partição ficam isoladas em `RateLimitMiddleware` e `ClientPartition`, onde um limiter distribuído entraria
   sem mudar o contrato de configuração.
 - **Estágio por IP** (toda requisição): IPv6 é agrupado por prefixo /64 (um cliente controla o /64 inteiro; sem isso,
-  rotacionar o sufixo burlaria o limite). IP desconhecido cai em um balde compartilhado: falha fechada, nunca sem limite.
+  rotacionar o sufixo burlaria o limite). Sem IP remoto (por exemplo, conexão por Unix domain socket) o limite vale **por
+  conexão**: clientes diferentes não dividem um balde só, e cada conexão continua limitada. Um aviso é registrado uma vez
+  (EventId 4002). Se nem o id da conexão existir, a requisição cai em um balde compartilhado (falha fechada, nunca sem limite).
+- **Preflight CORS**: com `Cors:Origins` configurado, o `OPTIONS` de preflight é respondido pelo CORS antes do limite e
+  **não conta** no balde do IP. Sem CORS configurado não há preflight a responder: `OPTIONS` é uma requisição comum e conta.
 - **Estágio por identidade** (só autenticadas): chave `tec_uid` (identidade normalizada do TEC.Security), `sub` ou
   `NameIdentifier`. Autenticado sem identificador usa um balde próprio. Chaves longas viram hash (memória limitada).
 - **Resposta 429**: `ApiResponse` com `errors[0].code = "http.rate_limit_exceeded"`, `traceId`, `Cache-Control: no-store` e
-  `Retry-After` em segundos (nunca 0).
+  `Retry-After` em segundos (nunca 0). Para origem liberada, o 429 sai com os headers CORS, então o navegador consegue lê-lo.
 - Desligar (`RateLimiting:Enabled: false`) é decisão explícita, para quando há gateway à frente.
 
 ## 🌐 Proxy reverso
@@ -133,7 +138,9 @@ A configuração é validada na subida (`UseTecHttp` e `ValidateOnStart`); erro 
 
 - `AllowedHosts` ausente ou `*` fora de Development.
 - `Forwarding` ligado sem proxy nem rede; IP ou CIDR inválido; prefixo `/0`; `ForwardLimit` fora de 1 a 5.
-- Origem CORS fora do formato; `*` fora de Development ou com `AllowCredentials`; `http` fora de localhost.
+- Origem CORS fora do formato; `*` fora de Development ou com `AllowCredentials`; `http` que não seja localhost em Development.
+- Item de `Methods`, `Headers` ou `ExposedHeaders` que não seja token HTTP; `*` misturado com outros itens ou com `AllowCredentials`.
+- Lista configurada com valor único em vez de itens por índice.
 - Limite fora de 1 a 1.000.000 ou janela fora de 1 a 86.400 s; `MaxAgeSeconds` fora de 0 a 86.400.
 - Valor presente e ilegível (ex.: `"abc"` num número): nunca é trocado pelo padrão em silêncio.
 
@@ -148,11 +155,16 @@ Medidor `TEC.Http` (registre-o no OpenTelemetry com `AddMeter("TEC.Http")`):
 
 ## ⚡ Compatibilidade
 
-.NET 8 e .NET 10, compatível com Native AOT e trimming (configuração lida sem reflexão).
+.NET 10, compatível com Native AOT e trimming (configuração lida sem reflexão).
 
 ## 🛡️ Limites conhecidos
 
 - Limite **por instância** (ver acima).
+- Preflights não contam no limite (o CORS responde 204 antes dele, inclusive para origem não liberada). É uma resposta
+  barata, sem rota nem autenticação; contenção de volume contra `OPTIONS` em massa fica com o gateway.
+- Atrás de proxy por Unix domain socket, o ASP.NET não consegue atestar o proxy (não há IP), então `Forwarding` não se
+  aplica e o limite vale por conexão do proxy: se ele abre uma conexão por requisição, o limite por IP perde efeito.
+  Limite também no proxy, ou use TCP com `Forwarding`.
 - Sem CSP: a API não serve HTML; se servir (ex.: documentação), defina a política na aplicação.
 - O componente não faz limite de tamanho de corpo nem de tempo de requisição: use `Kestrel` (`MaxRequestBodySize`,
   `RequestHeadersTimeout`) e o gateway.

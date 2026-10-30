@@ -14,9 +14,9 @@ public class RateLimitingTests
         ("Http:RateLimiting:PerIdentity:PermitLimit", porIdentidade.ToString(CultureInfo.InvariantCulture)),
         ("Http:RateLimiting:PerIdentity:WindowSeconds", "60"));
 
-    private static async Task<HttpStatusCode> Status(HttpClient client, string? remote, string? user = null)
+    private static async Task<HttpStatusCode> Status(HttpClient client, string? remote, string? user = null, string? connection = null)
     {
-        using var request = TestHost.Get("/ok", remote, user);
+        using var request = TestHost.Get("/ok", remote, user, connection: connection);
         using var response = await client.SendAsync(request);
         return response.StatusCode;
     }
@@ -68,13 +68,49 @@ public class RateLimitingTests
     }
 
     [Test]
-    public async Task Ip_desconhecido_cai_em_balde_compartilhado_e_continua_limitado()
+    public async Task Sem_ip_o_limite_vale_por_conexao_e_nao_junta_clientes_num_balde_so()
+    {
+        await using var app = await TestHost.StartAsync(Limite(porIp: 1));
+        var client = app.GetTestClient();
+
+        await Assert.That(await Status(client, remote: null, connection: "conexao-a")).IsEqualTo(HttpStatusCode.OK);
+        await Assert.That(await Status(client, remote: null, connection: "conexao-a")).IsEqualTo(HttpStatusCode.TooManyRequests);
+        // Outro cliente (outra conexão) não é punido pelo primeiro
+        await Assert.That(await Status(client, remote: null, connection: "conexao-b")).IsEqualTo(HttpStatusCode.OK);
+    }
+
+    [Test]
+    public async Task Sem_ip_com_id_de_conexao_longo_continua_limitado_sem_confundir_conexoes()
+    {
+        await using var app = await TestHost.StartAsync(Limite(porIp: 1));
+        var client = app.GetTestClient();
+        var a = new string('c', 500);
+        var b = new string('c', 499) + "d";
+
+        await Assert.That(await Status(client, remote: null, connection: a)).IsEqualTo(HttpStatusCode.OK);
+        await Assert.That(await Status(client, remote: null, connection: a)).IsEqualTo(HttpStatusCode.TooManyRequests);
+        await Assert.That(await Status(client, remote: null, connection: b)).IsEqualTo(HttpStatusCode.OK);
+    }
+
+    [Test]
+    public async Task Sem_ip_nem_id_de_conexao_cai_em_balde_compartilhado_e_continua_limitado()
     {
         await using var app = await TestHost.StartAsync(Limite(porIp: 1));
         var client = app.GetTestClient();
 
         await Assert.That(await Status(client, remote: null)).IsEqualTo(HttpStatusCode.OK);
         await Assert.That(await Status(client, remote: null)).IsEqualTo(HttpStatusCode.TooManyRequests);
+    }
+
+    [Test]
+    public async Task Id_de_conexao_nao_muda_o_balde_quando_ha_ip()
+    {
+        await using var app = await TestHost.StartAsync(Limite(porIp: 1));
+        var client = app.GetTestClient();
+
+        // Com IP conhecido, abrir outra conexão não dá limite novo
+        await Assert.That(await Status(client, "198.51.100.1", connection: "conexao-a")).IsEqualTo(HttpStatusCode.OK);
+        await Assert.That(await Status(client, "198.51.100.1", connection: "conexao-b")).IsEqualTo(HttpStatusCode.TooManyRequests);
     }
 
     [Test]
@@ -200,6 +236,79 @@ public class RateLimitingTests
         var statuses = await Task.WhenAll(Enumerable.Range(0, 300).Select(_ => Status(client, "198.51.100.1")));
 
         await Assert.That(statuses.Any(s => s == HttpStatusCode.TooManyRequests)).IsTrue();
+    }
+
+    [Test]
+    public async Task Resposta_429_sai_com_headers_cors_para_origem_liberada()
+    {
+        var config = Limite(porIp: 1);
+        config["Http:Cors:Origins:0"] = "https://app.example.com";
+        config["Http:Cors:ExposedHeaders:0"] = "Retry-After";
+        await using var app = await TestHost.StartAsync(config);
+        var client = app.GetTestClient();
+
+        using (var primeira = TestHost.Get("/ok", "198.51.100.1", origin: "https://app.example.com"))
+            (await client.SendAsync(primeira)).Dispose();
+
+        using var request = TestHost.Get("/ok", "198.51.100.1", origin: "https://app.example.com");
+        using var response = await client.SendAsync(request);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.TooManyRequests);
+        await Assert.That(response.Headers.GetValues("Access-Control-Allow-Origin").Single()).IsEqualTo("https://app.example.com");
+        await Assert.That(response.Headers.GetValues("Access-Control-Expose-Headers").Single()).Contains("Retry-After");
+    }
+
+    [Test]
+    public async Task Resposta_429_nao_libera_origem_fora_da_allowlist()
+    {
+        var config = Limite(porIp: 1);
+        config["Http:Cors:Origins:0"] = "https://app.example.com";
+        await using var app = await TestHost.StartAsync(config);
+        var client = app.GetTestClient();
+
+        await Status(client, "198.51.100.1");
+        using var request = TestHost.Get("/ok", "198.51.100.1", origin: "https://evil.example.com");
+        using var response = await client.SendAsync(request);
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.TooManyRequests);
+        await Assert.That(response.Headers.Contains("Access-Control-Allow-Origin")).IsFalse();
+    }
+
+    [Test]
+    public async Task Preflight_cors_nao_consome_o_limite()
+    {
+        var config = Limite(porIp: 1);
+        config["Http:Cors:Origins:0"] = "https://app.example.com";
+        await using var app = await TestHost.StartAsync(config);
+        var client = app.GetTestClient();
+
+        for (var i = 0; i < 5; i++)
+        {
+            using var preflight = TestHost.Preflight("/ok", "198.51.100.1", "https://app.example.com");
+            using var resposta = await client.SendAsync(preflight);
+            await Assert.That(resposta.StatusCode).IsEqualTo(HttpStatusCode.NoContent);
+        }
+
+        // Preflight de origem não liberada também é respondido pelo CORS (sem headers de liberação) e não conta
+        using (var estranho = TestHost.Preflight("/ok", "198.51.100.1", "https://evil.example.com"))
+        using (var resposta = await client.SendAsync(estranho))
+            await Assert.That(resposta.Headers.Contains("Access-Control-Allow-Origin")).IsFalse();
+
+        await Assert.That(await Status(client, "198.51.100.1")).IsEqualTo(HttpStatusCode.OK);
+        await Assert.That(await Status(client, "198.51.100.1")).IsEqualTo(HttpStatusCode.TooManyRequests);
+    }
+
+    [Test]
+    public async Task Sem_cors_configurado_options_continua_contando_no_limite()
+    {
+        // Sem CORS não há preflight a responder: OPTIONS é uma requisição comum e passa pelo limite (falha fechada)
+        await using var app = await TestHost.StartAsync(Limite(porIp: 1));
+        var client = app.GetTestClient();
+
+        using (var preflight = TestHost.Preflight("/ok", "198.51.100.1", "https://app.example.com"))
+            (await client.SendAsync(preflight)).Dispose();
+
+        await Assert.That(await Status(client, "198.51.100.1")).IsEqualTo(HttpStatusCode.TooManyRequests);
     }
 
     [Test]
