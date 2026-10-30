@@ -14,7 +14,7 @@
 
   <!-- Terceiros -->
   <ItemGroup>
-    <PackageVersion Include="TUnit" Version="1.74.0" />
+    <PackageVersion Include="TUnit" Version="1.76.0" />
   </ItemGroup>
 
   <!-- Pacotes do ASP.NET Core acompanham a versão do framework (net10.0) -->
