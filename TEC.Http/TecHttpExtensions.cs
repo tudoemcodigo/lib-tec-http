@@ -59,8 +59,8 @@ public static class TecHttpExtensions
         services.AddOptions<HstsOptions>().Configure<IOptions<TecHttpOptions>>((hsts, http) =>
         {
             hsts.MaxAge = TimeSpan.FromDays(http.Value.Hsts.MaxAgeDays);
-            hsts.IncludeSubDomains = false;
-            hsts.Preload = false;
+            hsts.IncludeSubDomains = http.Value.Hsts.IncludeSubDomains;
+            hsts.Preload = http.Value.Hsts.Preload;
         });
 
         return services;

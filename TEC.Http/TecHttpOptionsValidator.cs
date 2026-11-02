@@ -13,6 +13,7 @@ internal sealed class TecHttpOptionsValidator(IConfiguration configuration, IHos
     private const int MaxLimit = 1_000_000;
     private const int MaxSeconds = 86_400;
     private const int MaxTokenLength = 128;
+    private const int MinPreloadMaxAgeDays = 365;
 
     public ValidateOptionsResult Validate(string? name, TecHttpOptions options)
     {
@@ -69,6 +70,16 @@ internal sealed class TecHttpOptionsValidator(IConfiguration configuration, IHos
     {
         if (hsts.MaxAgeDays is < 1 or > 730)
             failures.Add("Http:Hsts:MaxAgeDays deve ficar entre 1 e 730.");
+
+        // Requisitos de hstspreload.org: includeSubDomains e max-age de pelo menos 1 ano. Valida mesmo com Enabled=false
+        // ou em Development (onde o header não sai): a configuração incoerente não pode chegar à produção.
+        if (hsts.Preload)
+        {
+            if (!hsts.IncludeSubDomains)
+                failures.Add("Http:Hsts:Preload exige Http:Hsts:IncludeSubDomains = true (requisito do hstspreload.org).");
+            if (hsts.MaxAgeDays < MinPreloadMaxAgeDays)
+                failures.Add($"Http:Hsts:Preload exige Http:Hsts:MaxAgeDays >= {MinPreloadMaxAgeDays.ToString(CultureInfo.InvariantCulture)} (1 ano, requisito do hstspreload.org).");
+        }
     }
 
     private static void ValidateRateLimiting(TecRateLimitingOptions rateLimiting, List<string> failures)

@@ -50,8 +50,21 @@ public sealed class TecHstsOptions
     /// <summary>Liga o header <c>Strict-Transport-Security</c> fora de Development. Padrão: <c>true</c>.</summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>Validade em dias (1 a 730). Padrão: 365. Sem <c>includeSubDomains</c> nem <c>preload</c> (irreversíveis na prática).</summary>
+    /// <summary>Validade em dias (1 a 730). Padrão: 365.</summary>
     public int MaxAgeDays { get; set; } = 365;
+
+    /// <summary>
+    /// Emite <c>includeSubDomains</c>: a política vale para todos os subdomínios, inclusive internos. Padrão: <c>false</c>.
+    /// Ligue depois de inventariar os subdomínios (todos precisam servir HTTPS).
+    /// </summary>
+    public bool IncludeSubDomains { get; set; }
+
+    /// <summary>
+    /// Emite <c>preload</c> (pedido de inclusão na lista de preload dos navegadores; praticamente irreversível). Padrão:
+    /// <c>false</c>. Exige <see cref="IncludeSubDomains"/> e <see cref="MaxAgeDays"/> &gt;= 365, senão a subida falha. Passo
+    /// deliberado de release; a submissão em hstspreload.org é manual. Sem efeito em Development (o HSTS não é emitido lá).
+    /// </summary>
+    public bool Preload { get; set; }
 }
 
 /// <summary>Headers de segurança: <c>X-Content-Type-Options</c>, <c>X-Frame-Options</c> e <c>Referrer-Policy</c>.</summary>
