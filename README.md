@@ -80,7 +80,7 @@ Seção `Http`. Os valores abaixo são os padrões (a seção inteira é opciona
   "AllowedHosts": "api.exemplo.com",
   "Http": {
     "Forwarding":      { "Enabled": false, "KnownProxies": [], "KnownNetworks": [], "ForwardLimit": 1 },
-    "Hsts":            { "Enabled": true, "MaxAgeDays": 365 },
+    "Hsts":            { "Enabled": true, "MaxAgeDays": 365, "IncludeSubDomains": false, "Preload": false },
     "SecurityHeaders": { "Enabled": true },
     "RateLimiting": {
       "Enabled": true,
@@ -99,7 +99,7 @@ Seção `Http`. Os valores abaixo são os padrões (a seção inteira é opciona
 |---|---|
 | **CORS** | Sem `Origins`, nenhuma origem é liberada (é o estado de partida: servidores não usam CORS). Formato `https://host[:porta]`, sem caminho, barra final nem curinga. `*` só em Development e sem credenciais. `http` só para localhost em Development. `Methods` vazio: GET, POST, PUT, PATCH, DELETE. `Headers` vazio: Content-Type, Authorization, X-Api-Key, Idempotency-Key, If-Match. Cada item de `Methods`, `Headers` e `ExposedHeaders` precisa ser um token HTTP (sem espaço, vírgula ou quebra de linha, até 128 caracteres). `*` vale só como item único e nunca com `AllowCredentials`. Para o navegador ler o `Retry-After` do 429, inclua `Retry-After` em `ExposedHeaders`. |
 | **Listas** | `Origins`, `Methods`, `Headers`, `ExposedHeaders`, `KnownProxies` e `KnownNetworks` são lidas por índice (`Http:Cors:Origins:0`; em variável de ambiente, `Http__Cors__Origins__0`). Um valor único na própria chave (ex.: `Http__Cors__Origins=https://a,https://b`) derruba a subida com a chave esperada na mensagem, em vez de deixar a lista vazia em silêncio. |
-| **HSTS** | Só fora de Development e em HTTPS. Sem `includeSubDomains` e sem `preload` (irreversíveis na prática; ligue por código se for decisão sua). |
+| **HSTS** | Só fora de Development e em HTTPS. `IncludeSubDomains` e `Preload` vêm desligados: sem configuração explícita o header é só `max-age`. Em produção, ligue `Http:Hsts:IncludeSubDomains` depois de inventariar os subdomínios (todos, inclusive os internos, precisam servir HTTPS). `Http:Hsts:Preload` é um passo deliberado de release (praticamente irreversível; a submissão em hstspreload.org é manual) e exige `IncludeSubDomains = true` e `MaxAgeDays >= 365`; senão a subida falha com a chave na mensagem. A validação vale também em Development e com `Enabled: false`, embora o header não saia ali. Valor que não seja `true` ou `false` também derruba a subida. |
 | **Headers** | `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`. Não sobrescrevem header já definido pela aplicação. |
 | **AllowedHosts** | Fora de Development, vazio ou `*` derruba a subida. Liste também o host que o orquestrador usa nas sondas de saúde (muitos chamam pelo IP do pod, e o filtro responde 400). |
 
@@ -112,7 +112,7 @@ Seção `Http`. Os valores abaixo são os padrões (a seção inteira é opciona
 - **Estágio por IP** (toda requisição): IPv6 é agrupado por prefixo /64 (um cliente controla o /64 inteiro; sem isso,
   rotacionar o sufixo burlaria o limite). Sem IP remoto (por exemplo, conexão por Unix domain socket) o limite vale **por
   conexão**: clientes diferentes não dividem um balde só, e cada conexão continua limitada. Um aviso é registrado uma vez
-  (EventId 4002). Se nem o id da conexão existir, a requisição cai em um balde compartilhado (falha fechada, nunca sem limite).
+  (EventId 6002). Se nem o id da conexão existir, a requisição cai em um balde compartilhado (falha fechada, nunca sem limite).
 - **Preflight CORS**: com `Cors:Origins` configurado, o `OPTIONS` de preflight é respondido pelo CORS antes do limite e
   **não conta** no balde do IP. Sem CORS configurado não há preflight a responder: `OPTIONS` é uma requisição comum e conta.
 - **Estágio por identidade** (só autenticadas): chave `tec_uid` (identidade normalizada do TEC.Security), `sub` ou

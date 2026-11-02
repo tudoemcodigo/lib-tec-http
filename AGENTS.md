@@ -20,7 +20,7 @@ Este arquivo complementa as instruções herdadas de `AGENT_BASE.md`. O TEC.Http
   - `TecHttpOptionsValidator.cs`: `AllowedHosts`, proxies e redes CIDR, limites, origens CORS e tokens de `Methods`/`Headers`/`ExposedHeaders`.
   - `Internal/ClientPartition.cs`: chaves de partição (IP com IPv6 em /64, conexão quando não há IP, identidade com hash acima de 128 caracteres).
   - `Internal/RateLimitResponse.cs`: 429 no `ApiResponse` do TEC.Core, com `Retry-After` e `traceId` (JSON gerado em compilação).
-  - `Internal/TecHttpLog.cs` e `Internal/TecHttpMetrics.cs`: avisos (EventId 4001 e 4002) e medidor `TEC.Http`.
+  - `Internal/TecHttpLog.cs` e `Internal/TecHttpMetrics.cs`: avisos (EventId 6001 e 6002, faixa 6000-6999 da CMP-OBS-07) e medidor `TEC.Http`.
 - `TEC.Http.Tests/`: testes TUnit de integração com `TestServer` (`TestHost.cs` simula IP remoto, id de conexão e usuário por headers de teste).
 - `build/`: props/targets compartilhados (canônicos do `tec-workflows`; não edite aqui).
 

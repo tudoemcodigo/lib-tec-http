@@ -20,6 +20,8 @@ internal static class TecHttpOptionsReader
         var hsts = section.GetSection("Hsts");
         options.Hsts.Enabled = Bool(hsts, "Enabled", options.Hsts.Enabled);
         options.Hsts.MaxAgeDays = Int(hsts, "MaxAgeDays", options.Hsts.MaxAgeDays);
+        options.Hsts.IncludeSubDomains = Bool(hsts, "IncludeSubDomains", options.Hsts.IncludeSubDomains);
+        options.Hsts.Preload = Bool(hsts, "Preload", options.Hsts.Preload);
 
         options.SecurityHeaders.Enabled = Bool(section.GetSection("SecurityHeaders"), "Enabled", options.SecurityHeaders.Enabled);
 
