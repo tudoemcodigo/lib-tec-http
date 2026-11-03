@@ -27,6 +27,7 @@
 - [🌐 Proxy reverso](#-proxy-reverso)
 - [🧱 O que derruba a subida](#-o-que-derruba-a-subida)
 - [📈 Observabilidade](#-observabilidade)
+- [🧩 Diagrama de arquitetura](#-diagrama-de-arquitetura)
 - [⚡ Compatibilidade](#-compatibilidade)
 - [🛡️ Limites conhecidos](#️-limites-conhecidos)
 
@@ -152,6 +153,82 @@ Medidor `TEC.Http` (registre-o no OpenTelemetry com `AddMeter("TEC.Http")`):
 |---|---|
 | `tec.http.ratelimit.rejected` (tag `stage`: `ip` ou `identity`) | Requisição recusada com 429 |
 | `tec.http.forwarded_headers.ignored` | `X-Forwarded-For` recebido com `Forwarding` desligado |
+
+## 🧩 Diagrama de arquitetura
+
+Componentes e ligações do `TEC.Http`, gerados pelo [GitDiagram](https://gitdiagram.com/tudoemcodigo/lib-tec-http) a partir da `main` em 02/11/2026. O diagrama é gerado por IA a partir de uma amostra do código: use-o como mapa de leitura, não como contrato.
+
+```mermaid
+flowchart TD
+
+subgraph group_configuration["Configuration and validation"]
+  node_options["HTTP options<br/>[TecHttpOptions.cs]"]
+  node_reader["Configuration reader"]
+  node_validator["Startup validation"]
+end
+
+subgraph group_edge["HTTP edge protections"]
+  node_registration["Service registration"]
+  node_proxy["Trusted proxy forwarding"]
+  node_hosts["Allowed hosts"]
+  node_hsts["HSTS"]
+  node_headers["Security headers"]
+  node_cors["CORS allowlist"]
+end
+
+subgraph group_limiting["Rate limiting"]
+  node_iplimit["Per-IP limiter"]
+  node_identity["Per-identity limiter"]
+end
+
+subgraph group_internal["Shared internals"]
+  node_partition["Partition keys<br/>[ClientPartition.cs]"]
+  node_response["429 response"]
+  node_metrics["HTTP metrics<br/>[TecHttpMetrics.cs]"]
+  node_logging["HTTP logging<br/>[TecHttpLog.cs]"]
+end
+
+node_app(("API application"))
+node_request(("Incoming requests"))
+node_auth["Authentication middleware"]
+
+node_app -->|"registers services"| node_registration
+node_registration -->|"reads configuration"| node_reader
+node_reader -->|"populates"| node_options
+node_registration -->|"registers validation"| node_validator
+node_validator -->|"validates"| node_options
+node_app -->|"adds middleware"| node_proxy
+node_request -->|"passes through"| node_proxy
+node_request -->|"host checked"| node_hosts
+node_request -->|"passes through"| node_hsts
+node_request -->|"passes through"| node_headers
+node_request -->|"passes through"| node_cors
+node_request -->|"passes through"| node_iplimit
+node_auth -->|"precedes"| node_identity
+node_request -->|"passes through"| node_identity
+node_iplimit -->|"gets IP key"| node_partition
+node_identity -->|"gets identity key"| node_partition
+node_iplimit -->|"writes rejection"| node_response
+node_identity -->|"writes rejection"| node_response
+node_iplimit -->|"records rejections"| node_metrics
+node_identity -->|"records rejections"| node_metrics
+node_proxy -->|"records ignored headers"| node_metrics
+node_proxy -->|"logs ignored headers"| node_logging
+
+
+classDef toneNeutral fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
+classDef toneAmber fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
+classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
+classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
+class node_options,node_reader,node_validator toneBlue
+class node_registration,node_proxy,node_hosts,node_hsts,node_headers,node_cors toneAmber
+class node_iplimit,node_identity,node_app,node_request toneMint
+class node_partition,node_response,node_metrics,node_logging toneRose
+class node_auth toneIndigo
+```
 
 ## ⚡ Compatibilidade
 
